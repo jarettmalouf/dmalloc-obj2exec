@@ -10,8 +10,7 @@
 #define FOOTER_SIZE sizeof(struct footer_t)
 #define VERY_LARGE_NUMBER (size_t) -1
 #define CANARY (char *) "Here now, don't make a sound\nSay, have you heard the news today?\nOne flag was taken down\nTo raise another in its place\nA heavy cross you bear\nA stubborn heart remains unchanged\nNo harm, no life, no love\nNo stranger singing in your name\nBut maybe the season\nThe colors change in the valley skies\nDear God, I've sealed my fate\nRunning through hell, heaven can wait\nLong road to ruin there in your eyes\nUnder the cold streetlights\nNo tomorrow, no dead end in sight\nLet's say we take this town\nNo king or queen of any state\nGet up to shut it down\nOpen the streets and raise the gates\nI know a wall to scale\nI know a field without a name\nHead on without a care\nBefore it's way too late\nMaybe the season\nThe colors change in the valley skies\nOh God, I've sealed my fate\nRunning through hell, heaven can wait\nLong road to ruin there in your eyes\nUnder the cold streetlights\nNo tomorrow, no dead ends\nLong road to ruin there in your eyes\nUnder the cold streetlights\nNo tomorrow, no dead end in sight\nFor every piece to fall in place\nForever gone without a trace\nYour horizon takes its shape\nNo turning back, don't turn that page\nCome now, I'm leaving here tonight\nCome now, let's leave it all behind\nIs that the price you pay?\nRunning through hell, heaven can wait\nLong road to ruin there in your eyes\nUnder the cold streetlights\nNo tomorrow, no dead ends\nLong road to ruin there in your eyes\nUnder the cold streetlights\nNo tomorrow, no dead ends\nLong road to ruin there in your eyes\nUnder the cold streetlights\nNo tomorrow, no dead end in sight"
-
-#define TEMP_ALIGN 10
+#define THRESHOLD 5
 
 // You may write code here.
 // (Helper functions, types, structs, macros, globals, etc.)
@@ -34,7 +33,7 @@ struct dmalloc_statistics s = get_new_stats();
 
 struct header_t {
     size_t size;
-    bool freed;
+    int freed;
     const char* file;
     long line;
     uintptr_t header_addr;
@@ -47,6 +46,8 @@ struct header_t {
 struct footer_t {
     char* overflow;
 };
+
+void *last_freed = nullptr;
 
 // DLL
 
@@ -109,25 +110,92 @@ void remove_record(header_t *info) {
     }
 }
 
+// heavy hitter stuff
+
+struct file_line_pair {
+    const char *file;
+    long line;
+};
+
+struct file_line_pair K[THRESHOLD]; 
+size_t count[THRESHOLD];
+int min_index = 100;
+int k_size = 0;
+
+struct file_line_pair new_file_line_pair(const char *file, long line) {
+    struct file_line_pair x;
+    x.file = file;
+    x.line = line;
+    return x;
+}
+
+void update_heavy_hitters(const char *file, long line, size_t sz) {
+    int index_in_K = -1;
+    struct file_line_pair pair = new_file_line_pair(file, line);
+    for (int i = 0; i < k_size; i++) {
+        if (K[i].file == pair.file && K[i].line == pair.line) {
+            index_in_K = i; 
+            break;
+        }
+    }
+
+    // if this pair is already in K, update it
+    if (index_in_K != -1) {
+        count[index_in_K] += sz;
+        return;
+    }
+
+    // if there's space to add it, add it and update min_index if it's the smallest
+    if (k_size < THRESHOLD) {
+        K[k_size] = pair;
+        count[k_size] = sz;
+        if (sz < count[min_index]) min_index = k_size;
+        k_size++;
+        return; 
+    }
+
+    // if there's no space to add it but it doesn't deserve it, exit 
+    if (sz <= count[min_index]) return; 
+    
+
+    // if there's no space to add it and it does deserve it, put it in place of the smallest entry and calculate new min_index
+    K[min_index] = pair;
+    count[min_index] = sz;
+    size_t new_min = count[0];
+    int new_min_index = 0;
+    for (int i = 1; i < k_size; i++) {
+        if (count[i] < new_min) {
+            new_min = count[i];
+            new_min_index = i;
+        }
+    }
+    min_index = new_min_index;
+}
+
+float *generate_percentages() {
+    float *percentages = (float *) malloc(sizeof(float) * k_size);
+    size_t sum = 0;
+    for (int i = 0; i < k_size; i++) {
+        sum += count[i];
+    }
+    for (int i = 0; i < k_size; i++) {
+        percentages[i] = count[i] / sum;
+    }
+    return percentages;
+}
+
 /// dmalloc_malloc(sz, file, line)
 ///    Return a pointer to `sz` bytes of newly-allocated dynamic memory.
 ///    The memory is not initialized. If `sz == 0`, then dmalloc_malloc must
 ///    return a unique, newly-allocated pointer value. The allocation
 ///    request was at location `file`:`line`.
 
-uintptr_t get_alignment_gap(uintptr_t curr, size_t align) {
-    return curr % align == 0 ? 0 : align - (curr % align);
-}
-
 void* dmalloc_malloc(size_t sz, const char* file, long line) {
     (void) file, (void) line;    
-    // uintptr_t space = get_alignment_gap(HEADER_SIZE + sz, TEMP_ALIGN);
     void *ptr = (void *) base_malloc(HEADER_SIZE + sz + FOOTER_SIZE);
     uintptr_t header = (uintptr_t) ptr;
     uintptr_t payload = header + HEADER_SIZE;
     uintptr_t footer = payload + sz;
-    // uintptr_t pre_footer = payload + sz;
-    // uintptr_t footer = pre_footer + space;
 
     if (ptr == nullptr || sz >= VERY_LARGE_NUMBER) {
         s.nfail++;
@@ -147,7 +215,7 @@ void* dmalloc_malloc(size_t sz, const char* file, long line) {
     if (payload + sz > s.heap_max) s.heap_max = payload + sz;
     
     h->size = sz;
-    h->freed = false;
+    h->freed = 0;
     h->file = file;
     h->line = line;
     h->header_addr = header;
@@ -158,6 +226,7 @@ void* dmalloc_malloc(size_t sz, const char* file, long line) {
     f->overflow = CANARY;
 
     add_record(h);
+    update_heavy_hitters(file, line, sz);
 
     return (void *) payload;
 }
@@ -185,7 +254,6 @@ struct node *get_allocated_block(void* ptr) {
 
 void dmalloc_free(void* ptr, const char* file, long line) {
     (void) file, (void) line;   // avoid uninitialized variable warnings
-    // Your code here.
     if (ptr == nullptr) return;
 
     if (!in_heap(ptr)) {
@@ -195,8 +263,6 @@ void dmalloc_free(void* ptr, const char* file, long line) {
 
     header_t *header = (header_t *) ((uintptr_t) ptr - HEADER_SIZE);
     node *allocated_node = get_allocated_block(ptr);
-
-
 
     if (* (int*) header == '\0') {
         fprintf(stderr, "MEMORY BUG: %s:%ld: invalid free of pointer %p, not allocated\n", file, line, ptr);
@@ -211,7 +277,7 @@ void dmalloc_free(void* ptr, const char* file, long line) {
         exit(1);
     }
 
-    if (header->freed) {
+    if (header->freed == 1 || ptr == last_freed) {
         fprintf(stderr, "MEMORY BUG: %s:%ld: invalid free of pointer %p, double free\n", file, line, ptr);
         exit(1);
     }
@@ -230,7 +296,8 @@ void dmalloc_free(void* ptr, const char* file, long line) {
 
     s.nactive--;
     s.active_size -= header->size;
-    header->freed = true;
+    header->freed = 1;
+    last_freed = ptr;
 
     remove_record(header);
 
@@ -298,7 +365,6 @@ void dmalloc_print_statistics() {
 ///    memory.
 
 void dmalloc_print_leak_report() {
-    // Your code here.
     struct node *curr = head->next;
     for (int i = 1; i < (int) s.nactive + 1; i++) {
         header_t *h = curr->info;
@@ -311,5 +377,11 @@ void dmalloc_print_leak_report() {
 ///    Print a report of heavily-used allocation locations.
 
 void dmalloc_print_heavy_hitter_report() {
-    // Your heavy-hitters code here
+    float *percentages = generate_percentages();
+    for (int i = 0; i < k_size; i++) {
+        struct file_line_pair pair = K[i];
+        size_t sz = count[i];
+        printf("HEAVY HITTER: %s:%ld: %zu bytes (~%.1f%%)\n", pair.file, pair.line, sz, percentages[i]);
+    }
+    free(percentages);
 }
