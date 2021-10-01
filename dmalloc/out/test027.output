@@ -1,0 +1,2 @@
+MEMORY BUG: test027.cc:12: detected wild write during free of pointer 0x7c6ee0
+free(): invalid pointer

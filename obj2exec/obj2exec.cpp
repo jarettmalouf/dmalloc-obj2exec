@@ -5,6 +5,7 @@
 
 // Uncomment the following line to enable lprintf(...) macros
 #define L_DEBUG
+#define PAGE_SIZE 0x1000
 
 #ifdef L_DEBUG
   #define lprintf(...) fprintf(stderr, "[LD] " __VA_ARGS__)
@@ -116,18 +117,8 @@ int find_sections(elfio* reader, source_info* src_info)
   return 0;
 }
 
-
 ELFIO::Elf64_Addr get_next_vaddr(ELFIO::Elf64_Addr curr_addr, ELFIO::Elf_Xword align) {
-  return curr_addr == 0 ? 0x40000 : align * ((curr_addr / align) + 1);
-}
-
-void configure_segment(memory_map_segment *curr_seg, main_section_info sec, ELFIO::Elf64_Addr *curr_addr) {
-  if (sec.sz == 0) return;
-  *curr_addr = get_next_vaddr(*curr_addr, sec.align);
-  curr_seg->vaddr = *curr_addr;
-  curr_seg->size  = sec.sz;
-  // curr_seg->flags = sec.flags;
-  curr_seg->align = sec.align;
+  return curr_addr % align == 0 ? curr_addr : curr_addr + (align - (curr_addr % align));
 }
 
 // The second pass in our linker generates a memory map of where each section
@@ -157,12 +148,27 @@ int generate_memory_map(const source_info* info, memory_map* mm)
   // TODO: set up vaddrs, flags and alignment for every segment with non-zero
   // size.
 
-  // ELFIO::Elf64_Addr *curr_addr = 0;
-  
-  configure_segment(&mm->segments[SEG_TEXT], info->main_sections[SEC_TEXT], curr_addr);
-  configure_segment(&mm->segments[SEG_RODATA], info->main_sections[SEC_RODATA], curr_addr);
-  configure_segment(&mm->segments[SEG_DATA], info->main_sections[SEC_DATA], curr_addr);
-  configure_segment(&mm->segments[SEG_BSS], info->main_sections[SEC_BSS], curr_addr);
+  ELFIO::Elf64_Addr curr_addr   = 0x400000;
+  mm->segments[SEG_TEXT].size   = info->main_sections[SEC_TEXT].sz;
+  mm->segments[SEG_RODATA].size = info->main_sections[SEC_RODATA].sz;
+  mm->segments[SEG_DATA].size   = info->main_sections[SEC_DATA].sz;
+  mm->segments[SEG_BSS].size    = info->main_sections[SEC_BSS].sz;
+
+  for (int i = SEG_TEXT; i < SEG_COUNT; i++) {
+    if (mm->segments[i].size == 0) continue;
+    mm->segments[i].align = PAGE_SIZE;
+    curr_addr = get_next_vaddr(curr_addr, PAGE_SIZE);
+    mm->segments[i].vaddr = curr_addr;
+    curr_addr += mm->segments[i].size;
+
+    switch (i) {
+      case SEG_TEXT:    mm->segments[i].flags = PF_R | PF_X;  break;
+      case SEG_RODATA:  mm->segments[i].flags = PF_R;         break;
+      case SEG_DATA:    
+      case SEG_BSS:     mm->segments[i].flags = PF_R | PF_W;  break;
+      default:                                                break;
+    }
+  }
 
   return 0;
 }
@@ -876,16 +882,38 @@ int allocate_memory_map(const source_info* src_info, memory_map* mm)
    */
 
   // Copy sizes from src_info to mm
-  mm->segments[SEG_TEXT].size   = src_info->main_sections[SEC_TEXT].sz;
-  mm->segments[SEG_DATA].size   = src_info->main_sections[SEC_DATA].sz;
-  mm->segments[SEG_BSS].size    = src_info->main_sections[SEC_BSS].sz;
-  mm->segments[SEG_RODATA].size = src_info->main_sections[SEC_RODATA].sz;
 
-  // TODO: set up vaddrs, flags and alignment for each segment that you use.
-  // Hint: For extra marks, see if you can combine more than one segment into
-  // the same page (where each segment starts at a different offset within the
-  // page so that they don't overlap). Note, however, that you must still
-  // be able to enforce read, write and execute permissions correctly.
+  int prot = PROT_READ | PROT_EXEC | PROT_WRITE;
+  int flags = MAP_PRIVATE | MAP_32BIT | MAP_ANONYMOUS;
+
+  ELFIO::Elf64_Addr curr_addr;
+  ELFIO::Elf_Xword align;
+  bool init = false;
+
+  for (int i = SEG_TEXT, j = SEC_TEXT; i < SEG_COUNT, j < SEC_COUNT; i++, j++) {
+    mm->segments[i].size = src_info->main_sections[j].sz;
+    if (mm->segments[i].size == 0) continue;
+
+    mm->segments[i].align = src_info->main_sections[j].align;
+
+    switch (i) {
+      case SEG_TEXT:    mm->segments[i].flags = PF_R | PF_X;  break;
+      case SEG_RODATA:  mm->segments[i].flags = PF_R;         break;
+      case SEG_DATA:    
+      case SEG_BSS:     mm->segments[i].flags = PF_R | PF_W;  break;
+      default:                                                break;
+    }
+
+    if (init) {
+      align = (mm->segments[i].flags == mm->segments[i - 1].flags) ? mm->segments[i].align : PAGE_SIZE;
+      curr_addr = get_next_vaddr(curr_addr, align);
+    }
+
+    curr_addr = (ELFIO::Elf64_Addr) mmap(init ? (void *) curr_addr : NULL, mm->segments[i].size, prot, flags, -1, 0);
+    init = true;
+    mm->segments[i].vaddr = curr_addr;
+    curr_addr += mm->segments[i].size;
+  }
 
   return 0;
 }
@@ -924,14 +952,17 @@ int load(ELFIO::elfio* writer, dest_info* dst_info, memory_map* mm)
   if (dst_info->sec_ptr[SEC_TEXT]) {
     void* p = (void*) dst_info->seg_ptr[SEG_TEXT]->get_virtual_address();
     memcpy(p, dst_info->sec_ptr[SEC_TEXT]->get_data(), dst_info->sec_ptr[SEC_TEXT]->get_size());
+    mprotect(p, mm->segments[SEG_TEXT].size, PROT_READ | PROT_EXEC);
   }
   if (dst_info->sec_ptr[SEC_RODATA]) {
     void* p = (void*) dst_info->seg_ptr[SEG_RODATA]->get_virtual_address();
     memcpy(p, dst_info->sec_ptr[SEC_RODATA]->get_data(), dst_info->sec_ptr[SEC_RODATA]->get_size());
+    mprotect(p, mm->segments[SEG_RODATA].size, PROT_READ);
   }
   if (dst_info->sec_ptr[SEC_DATA]) {
     void* p = (void*) dst_info->seg_ptr[SEG_DATA]->get_virtual_address();
     memcpy(p, dst_info->sec_ptr[SEC_DATA]->get_data(), dst_info->sec_ptr[SEC_DATA]->get_size());
+    mprotect(p, mm->segments[SEG_DATA].size, PROT_READ | PROT_WRITE);
   }
 
   lprintf("Starting program...\n");
