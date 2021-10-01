@@ -1,2 +1,3 @@
-Bad pointer 0x1ee4f5f
-MEMORY BUG: test023.cc:10: invalid free of pointer 0x1ee4f5f, not allocated
+Bad pointer 0x2228f77
+MEMORY BUG: test023.cc:10: invalid free of pointer 0x2228f77, not allocated
+  test023.cc:8: 0x2228f77 is 127 bytes inside a 2001 byte region allocated here
