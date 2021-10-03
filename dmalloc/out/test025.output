@@ -1,2 +1,2 @@
-Will free 0xbe1ef8
-MEMORY BUG: test025.cc:13: detected wild write during free of pointer 0xbe1ef8
+Will free 0xe62ef8
+MEMORY BUG: test025.cc:13: detected wild write during free of pointer 0xe62ef8
