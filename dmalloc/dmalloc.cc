@@ -140,7 +140,7 @@ void sort_HH() {
     // populating HH with K[] and count[]
     for (int i = 0; i < k_size; i++) {
         HH[i].pair = K[i];
-        HH[i].alloc = count[i];
+        HH[i].alloc = count[i] * (100 / SAMPLING_PERCENTAGE);
     }
     qsort(HH, k_size, sizeof(HH_element), cmpfunc);
 }
@@ -198,7 +198,7 @@ void update_heavy_hitters(const char *file, long line, size_t sz) {
 float *generate_percentages() {
     float *percentages = (float *) malloc(sizeof(float) * k_size);
     for (int i = 0; i < k_size; i++) {
-        percentages[i] = 100 * HH[i].alloc / total_random_size;
+        percentages[i] = 100 * HH[i].alloc / (total_random_size * (100 / SAMPLING_PERCENTAGE));
     }
     
     return percentages;
