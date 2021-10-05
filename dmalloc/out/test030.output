@@ -1,7 +1,7 @@
-LEAK CHECK: test030.cc:18: allocated object 0x1eb35d8 with size 19
-LEAK CHECK: test030.cc:16: allocated object 0x1eb3478 with size 17
-LEAK CHECK: test030.cc:15: allocated object 0x1eb33c8 with size 16
-LEAK CHECK: test030.cc:14: allocated object 0x1eb3318 with size 15
-LEAK CHECK: test030.cc:13: allocated object 0x1eb3268 with size 14
-LEAK CHECK: test030.cc:11: allocated object 0x1eb3108 with size 12
-LEAK CHECK: test030.cc:10: allocated object 0x1eb3058 with size 11
+LEAK CHECK: test030.cc:18: allocated object 0x15b35d8 with size 19
+LEAK CHECK: test030.cc:16: allocated object 0x15b3478 with size 17
+LEAK CHECK: test030.cc:15: allocated object 0x15b33c8 with size 16
+LEAK CHECK: test030.cc:14: allocated object 0x15b3318 with size 15
+LEAK CHECK: test030.cc:13: allocated object 0x15b3268 with size 14
+LEAK CHECK: test030.cc:11: allocated object 0x15b3108 with size 12
+LEAK CHECK: test030.cc:10: allocated object 0x15b3058 with size 11

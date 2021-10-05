@@ -10,8 +10,9 @@
 #define FOOTER_SIZE sizeof(struct footer_t)
 #define VERY_LARGE_NUMBER (size_t) -1
 #define CANARY (char *) "Here now, don't make a sound"
-#define THRESHOLD 5
+#define THRESHOLD 15
 #define SAMPLING_PERCENTAGE 10
+#define PRINT_HH 5
 
 struct dmalloc_statistics get_new_stats() {
     struct dmalloc_statistics s;
@@ -117,9 +118,9 @@ struct HH_element {
     long alloc;
 };
 
-struct file_line_pair K[THRESHOLD];
-struct HH_element HH[THRESHOLD];
-size_t count[THRESHOLD];
+struct file_line_pair *K = (struct file_line_pair *) malloc (sizeof(struct file_line_pair) * THRESHOLD);
+size_t *count = (size_t *) malloc (sizeof(size_t) * THRESHOLD);
+struct HH_element *HH = (struct HH_element *) malloc (sizeof(struct HH_element) * THRESHOLD);
 int min_index = 100;
 int k_size = 0;
 
@@ -179,7 +180,6 @@ void update_heavy_hitters(const char *file, long line, size_t sz) {
 
     // if there's no space to add it but it doesn't deserve it, exit 
     if (sz <= count[min_index]) return;
-    
 
     // if there's no space to add it and it does deserve it, put it in place of the smallest entry and calculate new min_index
     K[min_index] = pair;
@@ -359,10 +359,11 @@ void dmalloc_print_leak_report() {
 void dmalloc_print_heavy_hitter_report() {
     sort_HH();
     float *percentages = generate_percentages();
-    for (int i = 0; i < k_size; i++) {
+    int size = k_size < PRINT_HH ? k_size : PRINT_HH;
+    for (int i = 0; i < size; i++) {
         struct HH_element el = HH[i];
         if (percentages[i] < 10) break;
-        printf("HEAVY HITTER: %s:%ld: %zu bytes (~%.1f%%)\n", el.pair.file, el.pair.line, el.alloc, percentages[i]); 
+        printf("HEAVY HITTER: %s:%ld: %zu bytes (~%.3f%%)\n", el.pair.file, el.pair.line, el.alloc, percentages[i]); 
     }
     free(percentages);
 }
